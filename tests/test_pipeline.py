@@ -5,11 +5,13 @@ Run: pytest tests/ -v
 """
 
 import os
+
 import pytest
 from transformers import pipeline as hf_pipeline
 
+import src.pipeline as pipeline_module
 from src.knowledge_base import build_knowledge_base
-from src.pipeline import ask_question, get_llm
+from src.pipeline import ask_question, build_arg_parser, get_llm
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
@@ -95,3 +97,66 @@ class TestAnswerGeneration:
         assert "2,500" in answer or "2500" in answer or "starter" in answer, (
             "Answer should address the pricing question"
         )
+
+
+# ────────────────────────────────
+# Error handling additional tests 
+# ────────────────────────────────
+class TestErrorHandling:
+    def test_empty_question_raises(self, vector_store, llm):
+        with pytest.raises(ValueError):
+            ask_question(vector_store, llm, "")
+
+    def test_whitespace_only_question_raises(self, vector_store, llm):
+        with pytest.raises(ValueError):
+            ask_question(vector_store, llm, "   ")
+
+    def test_main_handles_missing_data_dir_gracefully(self, monkeypatch, capsys):
+        monkeypatch.setattr(pipeline_module.os.path, "isdir", lambda path: False)
+        pipeline_module.main()  # should not raise
+        captured = capsys.readouterr()
+        assert "data directory not found" in captured.out.lower()
+
+
+# ────────────────────────────────
+# Retrieval quality additional tests 
+# ────────────────────────────────
+class TestRetrievalBonus:
+    def test_retrieves_from_unrelated_handbook_doc(self, vector_store, llm):
+        """data/company_handbook.txt is unrelated HR content mixed into data/.
+        The retriever should still surface it when it's actually the best match."""
+        result = ask_question(vector_store, llm, "How many days of PTO do employees get?")
+        sources_text = " ".join(result["sources"]).lower()
+        assert "pto" in sources_text or "paid time off" in sources_text, (
+            "Sources should contain PTO-related content from the handbook doc"
+        )
+
+    def test_does_not_confuse_similar_pricing_across_docs(self, vector_store, llm):
+        """data/pricing.txt (agency packages) and data/product_faq.txt (AcmeCloud)
+        both mention dollar amounts. A Growth package question shouldn't pull
+        AcmeCloud pricing instead."""
+        result = ask_question(vector_store, llm, "How much does the Growth package cost?")
+        sources_text = " ".join(result["sources"]).lower()
+        assert "acmecloud" not in sources_text, (
+            "Growth package query should not retrieve unrelated AcmeCloud pricing"
+        )
+
+
+# ────────────────────────────────
+# CLI argument parsing additional tests
+# ────────────────────────────────
+class TestArgParser:
+    def test_query_flag_parses(self):
+        parser = build_arg_parser()
+        args = parser.parse_args(["--query", "How much is Growth?"])
+        assert args.query == "How much is Growth?"
+
+    def test_query_short_flag_parses(self):
+        parser = build_arg_parser()
+        args = parser.parse_args(["-q", "Do you offer SEO?"])
+        assert args.query == "Do you offer SEO?"
+
+    def test_query_defaults_to_none(self):
+        parser = build_arg_parser()
+        args = parser.parse_args([])
+        assert args.query is None
