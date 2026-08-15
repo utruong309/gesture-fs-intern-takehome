@@ -6,11 +6,10 @@ and vector store creation. You do NOT need to change anything here.
 """
 
 import os
-
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_community.vectorstores import FAISS
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_huggingface import HuggingFaceEmbeddings
 
 
 def get_embeddings():

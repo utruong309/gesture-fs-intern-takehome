@@ -12,7 +12,10 @@ Useful docs:
   - HuggingFace pipelines: https://python.langchain.com/docs/integrations/llms/huggingface_pipelines/
 """
 
+import argparse
 import os
+from collections.abc import Callable
+from typing import Any  # Bonus: type hints used throughout this file
 
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
@@ -60,7 +63,7 @@ Answer:"""
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TODO 1: Implement ask_question
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-def ask_question(vector_store, llm, question: str) -> dict:
+def ask_question(vector_store: Any, llm: Callable, question: str) -> dict[str, Any]:
     """Retrieve relevant chunks and generate an answer.
 
     Steps:
@@ -82,19 +85,46 @@ def ask_question(vector_store, llm, question: str) -> dict:
             "answer"  -> str: the generated answer
             "sources" -> list[str]: the chunk texts that were retrieved
     """
+    # Bonus: error handling for empty input
+    if not question or not question.strip():
+        raise ValueError("question must not be empty")
+
     docs = vector_store.similarity_search(question, k=3)
-    sources = [doc.page_content for doc in docs]
+    sources: list[str] = [doc.page_content for doc in docs]
     context = "\n\n".join(sources)
     prompt = PROMPT_TEMPLATE.format(context=context, question=question)
     result = llm(prompt)
-    answer = result[0]["generated_text"]
+    answer = result[0]["generated_text"].strip()
     return {"answer": answer, "sources": sources}
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # TODO 2: Complete the interactive loop
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-def main():
+def print_result(result: dict[str, Any]) -> None:
+    """Print a question's sources and answer in the CLI's display format."""
+    print("\n📄 Sources:")
+    for i, source in enumerate(result["sources"], start=1):
+        print(f"  {i}. {source}")
+
+    print(f"\n💬 Answer: {result['answer']}\n")
+
+
+# Bonus: --query flag for single-question mode (see main() below)
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Build the CLI argument parser"""
+    parser = argparse.ArgumentParser(description="Marketing agency Q&A chatbot")
+    parser.add_argument(
+        "--query",
+        "-q",
+        type=str,
+        default=None,
+        help="Ask a single question and exit, instead of starting the interactive loop",
+    )
+    return parser
+
+
+def main() -> None:
     """Interactive Q&A loop.
 
     Steps:
@@ -109,8 +139,25 @@ def main():
     """
     data_dir = os.path.join(os.path.dirname(__file__), "..", "data")
 
+    # Bonus: error handling for missing data directory
+    if not os.path.isdir(data_dir):
+        print(f"Error: data directory not found at {data_dir}")
+        return
+
+    args = build_arg_parser().parse_args()
+
     vector_store = build_knowledge_base(data_dir)
     llm = get_llm()
+
+    # Bonus: --query mode answers one question and exits
+    if args.query:
+        try:
+            result = ask_question(vector_store, llm, args.query)
+        except ValueError as e:
+            print(f"Error: {e}")
+            return
+        print_result(result)
+        return
 
     print("Ask a question about our services, pricing, or process.")
     print("Type 'quit' to exit.\n")
@@ -122,16 +169,18 @@ def main():
             print("Goodbye!")
             break
 
+        # Bonus: error handling for empty input
         if not question:
+            print("Please enter a question (or 'quit' to exit).\n")
             continue
 
-        result = ask_question(vector_store, llm, question)
+        try:
+            result = ask_question(vector_store, llm, question)
+        except ValueError as e:
+            print(f"Error: {e}\n")
+            continue
 
-        print("\n📄 Sources:")
-        for i, source in enumerate(result["sources"], start=1):
-            print(f"  {i}. {source}")
-
-        print(f"\n💬 Answer: {result['answer']}\n")
+        print_result(result)
 
 
 if __name__ == "__main__":
